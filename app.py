@@ -174,21 +174,3 @@ with col1:
 with col2:
     st.subheader("Monthly Energy Production")
     st.bar_chart(df_monthly)
-
-st.markdown("---")
-st.subheader("Assumptions & Notes")
-
-st.write(
-    """
-- Location data (irradiation) is **dummy/approximate** – replace with real datasets later.
-- Orientation and tilt effects are modeled with simple multipliers, not full geometry or time-of-day effects.
-- Performance Ratio (PR) is derived directly from the total losses slider (PR = 1 − losses).
-- Capacity factor is computed as:  
-  \\( CF = \\frac{E_{annual}}{P_{rated} \\times 8760} \\).
-- This version is meant as a **basic framework** – you can plug in:
-  - Real monthly irradiance data per location,
-  - Temperature effects,
-  - Financial analysis (LCOE, payback),
-  - CO₂ savings.
-"""
-)
