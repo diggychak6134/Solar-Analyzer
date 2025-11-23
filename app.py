@@ -8,45 +8,52 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🔆 Solar Energy Analyzer")
+st.title("🔆 Solar Energy Analyzer ( Data-Driven Version)")
 st.write(
     "Estimate annual solar energy yield for different locations and system configurations. "
-    "This is a simplified engineering model – you can refine the data and equations later."
+    "Uses approximate but realistic solar irradiation data per location."
 )
 
-# ---------------------------
-# 1. SIMPLE LOCATION DATABASE
-# ---------------------------
-# You can replace these with real data later (kWh/m²/day global horizontal irradiation)
-SOLAR_LOCATIONS = {
-    "Kolkata, India": {
-        "lat": 22.6,
-        "ghi_daily": 5.0  # approx
-    },
-    "Hamburg, Germany": {
-        "lat": 53.5,
-        "ghi_daily": 2.9
-    },
-    "Munich, Germany": {
-        "lat": 48.1,
-        "ghi_daily": 3.3
-    },
-    "Delhi, India": {
-        "lat": 28.6,
-        "ghi_daily": 5.3
-    },
-}
-
-# For monthly distribution, we just use a normalized shape (rough sinusoidal-like)
-# Jan..Dec factors that sum to 1.0 (you can tune these)
-MONTHLY_SHAPE = [0.07, 0.075, 0.085, 0.09, 0.095, 0.095,
-                 0.095, 0.09, 0.085, 0.08, 0.075, 0.07]
+# ----------------------------------------------------
+# 1. LOCATION DATABASE – MONTHLY GHI (kWh/m² per month)
+#    Values are approximate typical data, not exact.
+# ----------------------------------------------------
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-# ---------------------------
+# kWh/m²/month – rough but realistic patterns
+SOLAR_LOCATIONS = {
+    "Kolkata, India": {
+        "lat": 22.6,
+        "monthly_ghi": [120, 115, 140, 160, 170, 155, 150, 150, 145, 130, 110, 105],
+    },
+    "Delhi, India": {
+        "lat": 28.6,
+        "monthly_ghi": [130, 135, 160, 180, 200, 190, 185, 180, 160, 140, 120, 115],
+    },
+    "Hamburg, Germany": {
+        "lat": 53.5,
+        "monthly_ghi": [25, 45, 80, 115, 150, 165, 160, 135, 95, 60, 30, 18],
+    },
+    "Munich, Germany": {
+        "lat": 48.1,
+        "monthly_ghi": [40, 60, 100, 135, 165, 175, 175, 150, 110, 70, 40, 30],
+    },
+    "Berlin, Germany": {
+        "lat": 52.5,
+        "monthly_ghi": [30, 50, 90, 125, 155, 170, 165, 140, 100, 65, 35, 22],
+    },
+}
+
+def get_annual_and_daily_ghi(location_data: dict):
+    monthly = location_data["monthly_ghi"]
+    annual_ghi = sum(monthly)  # kWh/m²/year
+    daily_ghi = annual_ghi / 365.0  # kWh/m²/day
+    return annual_ghi, daily_ghi
+
+# ----------------------------------------------------
 # 2. SIDEBAR INPUTS
-# ---------------------------
+# ----------------------------------------------------
 st.sidebar.header("Inputs")
 
 location = st.sidebar.selectbox(
@@ -54,6 +61,8 @@ location = st.sidebar.selectbox(
     options=list(SOLAR_LOCATIONS.keys()),
     index=0
 )
+loc_data = SOLAR_LOCATIONS[location]
+annual_ghi, ghi_daily = get_annual_and_daily_ghi(loc_data)
 
 system_size_kw = st.sidebar.number_input(
     "System size (kW)",
@@ -75,16 +84,19 @@ tilt_angle = st.sidebar.slider(
     "Tilt angle (degrees)",
     min_value=0,
     max_value=60,
-    value=int(SOLAR_LOCATIONS[location]["lat"]),  # approximate: latitude
-    step=1
+    value=int(loc_data["lat"]),
+    step=1,
+    key=f"tilt_angle_{location}"
 )
 
 orientation = st.sidebar.selectbox(
     "Orientation",
-    options=["South (ideal in N hemisphere)",
-             "South-East / South-West",
-             "East / West",
-             "Flat / Horizontal"]
+    options=[
+        "South (ideal in N hemisphere)",
+        "South-East / South-West",
+        "East / West",
+        "Flat / Horizontal"
+    ]
 )
 
 system_losses_pct = st.sidebar.slider(
@@ -95,13 +107,10 @@ system_losses_pct = st.sidebar.slider(
     step=1
 )
 
-# ---------------------------
-# 3. SIMPLE CALCULATIONS
-# ---------------------------
-loc_data = SOLAR_LOCATIONS[location]
-ghi_daily = loc_data["ghi_daily"]  # kWh/m²/day (horizontal)
-
-# Orientation / tilt factor – super simplified fudge factors
+# ----------------------------------------------------
+# 3. CALCULATIONS
+# ----------------------------------------------------
+# Orientation factor – simple multipliers
 if orientation == "South (ideal in N hemisphere)":
     orientation_factor = 1.0
 elif orientation == "South-East / South-West":
@@ -111,10 +120,8 @@ elif orientation == "East / West":
 else:  # Flat / Horizontal
     orientation_factor = 0.88
 
-# Very rough tilt factor: slight boost around latitude, penalize extremes
 lat = loc_data["lat"]
 tilt_diff = abs(tilt_angle - lat)
-# Simple piecewise penalty: 0–20° diff => small penalty, >20 => more
 if tilt_diff <= 10:
     tilt_factor = 1.0
 elif tilt_diff <= 20:
@@ -122,38 +129,46 @@ elif tilt_diff <= 20:
 else:
     tilt_factor = 0.90
 
-# Daily irradiation on tilted plane
+# Adjust daily GHI by orientation & tilt
 daily_irradiation_tilt = ghi_daily * orientation_factor * tilt_factor  # kWh/m²/day
 
-# Performance ratio from system losses (very simplified)
+# System losses → Performance Ratio
 pr = 1.0 - system_losses_pct / 100.0
 
-# Specific yield (kWh per kWp per year)
-# classic approx: specific_yield = daily_irradiation_tilt * 365 * PR / reference_irr
-# Here we assume 1 kWp ~ 1 kW/m² for simplicity.
+# Specific yield & annual energy
+# Assuming 1 kWp ~ 1 kW/m² effective; this is a simplification.
 specific_yield = daily_irradiation_tilt * 365.0 * pr  # kWh/kWp/year (approx)
+annual_energy_kwh = specific_yield * system_size_kw
 
-# Total annual energy
-annual_energy_kwh = specific_yield * system_size_kw  # kWh/year
+capacity_factor = annual_energy_kwh / (system_size_kw * 8760.0)
 
-# Capacity factor
-capacity_factor = annual_energy_kwh / (system_size_kw * 8760.0)  # fraction
+# Monthly energy distribution based on monthly_ghi share
+monthly_ghi = loc_data["monthly_ghi"]
+annual_ghi_tilt = annual_ghi * orientation_factor * tilt_factor
+if annual_ghi_tilt > 0:
+    monthly_fractions = [m / annual_ghi for m in monthly_ghi]
+else:
+    monthly_fractions = [1.0 / 12.0] * 12
 
-# Monthly energy split
-monthly_energies = [annual_energy_kwh * f for f in MONTHLY_SHAPE]
+monthly_energies = [annual_energy_kwh * f for f in monthly_fractions]
+
 df_monthly = pd.DataFrame({
     "Month": MONTH_NAMES,
     "Energy (kWh)": monthly_energies
 }).set_index("Month")
 
-# ---------------------------
+# ----------------------------------------------------
 # 4. OUTPUTS
-# ---------------------------
+# ----------------------------------------------------
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Key Results")
 
+    st.metric(
+        "Daily solar irradiation (horizontal)",
+        f"{ghi_daily:.2f} kWh/m²/day"
+    )
     st.metric(
         "Daily solar irradiation on tilted plane",
         f"{daily_irradiation_tilt:.2f} kWh/m²/day"
@@ -174,3 +189,15 @@ with col1:
 with col2:
     st.subheader("Monthly Energy Production")
     st.bar_chart(df_monthly)
+
+st.markdown("---")
+st.subheader("Assumptions & Notes")
+st.write(
+    """
+- Monthly solar irradiation values are approximate, location-specific typical values (kWh/m²/month).
+- Annual GHI is the sum of monthly values; daily GHI = annual GHI / 365.
+- Tilt and orientation are modeled with simple multipliers, not full sun-path geometry.
+- Performance Ratio (PR) is derived directly from the total losses slider: PR = 1 − losses.
+- Capacity factor = annual energy / (rated power × 8760).
+"""
+)
